@@ -1,0 +1,16 @@
+# Ambientes virtuais e Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+.miniconda/
+
+# Dados (Melhor não subir se forem sensíveis)
+data/raw/
+data/processed/
+neo4j/data/
+
+# Logs e configurações do VS Code
+.vscode/
+*.log
