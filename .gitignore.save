@@ -1,0 +1,13 @@
+# Ambientes virtuais e Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+.miniconda/
+
+# Dados (Melhor não subir se forem sensíveis)
+
+# Logs e configurações do VS Code
+.vscode/
+*.log
