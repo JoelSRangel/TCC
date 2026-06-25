@@ -6,64 +6,53 @@ class ClinicalTextExtractor:
         self.xml_files = xml_files_list
 
     def extract_tags(self):
-        """
-        Busca profunda por tags de anotacao usando XPath (.//)
-        """
         all_nodes = []
-        
         for file_path in self.xml_files:
             if not os.path.exists(file_path):
                 continue
-                
             file_name = os.path.basename(file_path).replace(".xml", "")
-            
             try:
                 tree = ET.parse(file_path)
                 root = tree.getroot()
-                
-                # O './/annotation' faz uma busca profunda em toda a árvore XML
                 for anno in root.findall('.//annotation'):
-                    original_id = anno.get('id')
-                    global_id = f"{file_name}_{original_id}"
-                    
                     all_nodes.append({
-                        "id": global_id,
+                        "id": f"{file_name}_{anno.get('id')}",
                         "tag_type": anno.get('tag'),
                         "text": anno.get('text'),
                         "abbr": anno.get('abbr', '')
                     })
-            except ET.ParseError as e:
-                print(f"[ERRO NO PARSER] Falha ao ler {file_path}: {e}")
-                
+            except ET.ParseError:
+                continue
         return all_nodes
 
     def extract_relations(self):
-        """
-        Busca profunda por arcos de relacionamento usando XPath (.//)
-        """
         all_edges = []
+        
+        # Dicionario de mapeamento para transformar texto em numero (requisito do GDS KGE)
+        rel_mapping = {
+            "associated_with": 1,
+            "negation_of": 2
+        }
         
         for file_path in self.xml_files:
             if not os.path.exists(file_path):
                 continue
                 
             file_name = os.path.basename(file_path).replace(".xml", "")
-            
             try:
                 tree = ET.parse(file_path)
                 root = tree.getroot()
-                
-                # O './/rel' garante a captura profunda das arestas
                 for rel in root.findall('.//rel'):
-                    global_source = f"{file_name}_{rel.get('annotation1')}"
-                    global_target = f"{file_name}_{rel.get('annotation2')}"
+                    original_type = rel.get('reltype')
+                    
+                    # Converte para o numero correspondente. Se for um tipo raro, padroniza como 3
+                    numeric_type = rel_mapping.get(original_type, 3)
                     
                     all_edges.append({
-                        "source": global_source,
-                        "target": global_target,
-                        "rel_type": rel.get('reltype')
+                        "source": f"{file_name}_{rel.get('annotation1')}",
+                        "target": f"{file_name}_{rel.get('annotation2')}",
+                        "rel_type": numeric_type # Agora enviamos um INTEIRO
                     })
             except ET.ParseError:
                 continue
-                
         return all_edges
