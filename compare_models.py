@@ -15,7 +15,7 @@ def extract_clean_triples():
     query = """
     MATCH (h:Entidade)-[r:CONECTA_A]->(t:Entidade)
     WHERE r.tipo IS NOT NULL
-    RETURN h.text AS head, r.tipo AS relation, t.text AS tail
+    RETURN h.id AS head, r.tipo AS relation, t.id AS tail
     """
     
     with driver.session() as session:
