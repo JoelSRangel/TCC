@@ -17,12 +17,12 @@ def extract_triples_and_labels():
     query_triples = """
     MATCH (h:Entidade)-[r:CONECTA_A]->(t:Entidade)
     WHERE r.tipo IS NOT NULL
-    RETURN h.text AS head, r.tipo AS relation, t.text AS tail
+    RETURN h.id AS head, r.tipo AS relation, t.id AS tail
     """
     
     query_labels = """
     MATCH (e:Entidade)
-    RETURN e.text AS text, e.tag_type AS tag
+    RETURN e.id AS id, e.tag_type AS tag
     """
     
     with driver.session() as session:
@@ -38,10 +38,14 @@ def extract_triples_and_labels():
         raise ValueError("[ERRO] Falha ao recuperar triplas ou categorias do banco.")
         
     df_triples = df_triples.astype(str)
-    df_labels['text'] = df_labels['text'].astype(str)
+    df_labels['id'] = df_labels['id'].astype(str)
     df_labels['tag'] = df_labels['tag'].astype(str)
     
-    label_dict = dict(zip(df_labels['text'], df_labels['tag']))
+    # Chave = id do conceito (texto normalizado + categoria semantica, ex.
+    # "FRATURA|Disease"), a mesma identidade usada na ingestao do grafo
+    # (src/extractor.py::_concept_key na main) — nao mais o texto puro, que
+    # colapsaria conceitos homonimos de categorias diferentes.
+    label_dict = dict(zip(df_labels['id'], df_labels['tag']))
     
     print(f"[SUCESSO] {len(df_triples)} triplas clínicas e {len(label_dict)} mapeamentos de categorias carregados.")
     return df_triples, label_dict
@@ -70,9 +74,10 @@ def process_and_evaluate_space(model_result, label_dict):
     ordered_tags = []
     valid_indices = []
     
-    for entity_text, entity_id in triples_factory.entity_to_id.items():
-        # Busca a tag original do Neo4j para aquela palavra específica
-        tag = label_dict.get(entity_text, "Unknown")
+    for entity_label, entity_id in triples_factory.entity_to_id.items():
+        # entity_label e o id do conceito (texto+categoria), nao mais o
+        # texto puro — busca a tag original do Neo4j para aquele conceito
+        tag = label_dict.get(entity_label, "Unknown")
         # Ignora nós sem categoria ou não mapeados para não distorcer a estatística
         if tag != "Unknown" and tag != "None":
             ordered_tags.append(tag)
