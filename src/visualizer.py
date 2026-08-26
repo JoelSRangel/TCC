@@ -20,7 +20,10 @@ class EmbeddingVisualizer:
         plt.figure(figsize=(15, 9))
         
         unique_tags = list(set(self.tags))
-        colors = plt.cm.get_cmap('tab20', len(unique_tags)) # Usamos tab20 que tem mais variedade de cores
+        # plt.cm.get_cmap(nome, N) foi removido do matplotlib (deprecado desde 3.7,
+        # removido em versões recentes); o substituto atual é indexar o registro de
+        # colormaps e chamar .resampled(N).
+        colors = plt.colormaps['tab20'].resampled(len(unique_tags)) # Usamos tab20 que tem mais variedade de cores
         
         for i, tag in enumerate(unique_tags):
             indices = [j for j, t in enumerate(self.tags) if t == tag]
