@@ -16,8 +16,8 @@ def extract_triples_and_labels():
     
     query_triples = """
     MATCH (h:Entidade)-[r:CONECTA_A]->(t:Entidade)
-    WHERE r.tipo_num IS NOT NULL
-    RETURN h.text AS head, r.tipo_num AS relation, t.text AS tail
+    WHERE r.tipo IS NOT NULL
+    RETURN h.text AS head, r.tipo AS relation, t.text AS tail
     """
     
     query_labels = """
