@@ -1,0 +1,21 @@
+name: tcc_graphs
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+  - numpy
+  - pandas
+  - matplotlib
+  - scikit-learn
+  - pip:
+      - neo4j
+      - pykeen
+      - python-dotenv
+# Observação: as versões exatas usadas antes da reinstalação do Windows foram
+# perdidas (não havia environment.yml/requirements.txt versionado no repositório
+# até agora). Depois de confirmar que `python main.py` roda sem erro com este
+# arquivo, rode:
+#   conda env export --from-history > environment.yml
+# e comite o resultado, para travar as versões que de fato funcionaram.
