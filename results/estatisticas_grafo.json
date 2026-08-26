@@ -1,0 +1,13 @@
+{
+  "total_nos": 17897,
+  "total_arestas": 9253,
+  "nos_isolados": 9936,
+  "num_componentes_conexos": 10838,
+  "tamanho_maior_componente": 5633,
+  "pct_nos_no_maior_componente": 31.47,
+  "grau_medio": 1.034,
+  "grau_mediano": 0.0,
+  "grau_min": 0.0,
+  "grau_max": 281.0,
+  "grau_desvio_padrao": 3.999
+}

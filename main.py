@@ -6,6 +6,7 @@ from src.database import Neo4jInjestor
 from src.embeddings import GraphEmbeddingManager
 from src.analysis import EmbeddingAnalyzer
 from src.visualizer import EmbeddingVisualizer
+from src.graph_stats import GraphStatsAnalyzer
 
 def main():
     # 1. Varredura dinâmica de múltiplos arquivos XML usando glob
@@ -49,16 +50,37 @@ def main():
         print(f"[ERRO NOS EMBEDDINGS] {e}")
         return
 
+    # 3.5 Exclusão dos nós isolados antes de qualquer avaliação de qualidade
+    # de embedding. Um nó sem nenhuma aresta não tem sinal estrutural: o
+    # Node2Vec não gera nenhuma caminhada a partir dele, então o vetor
+    # recebido é essencialmente ruído de inicialização, não algo aprendido.
+    # Incluí-lo em PCA/similaridade/clustering distorce essas métricas
+    # (decisão registrada no plano de ação pós-banca, ver item 3).
+    print("\n=== 3.5. EXCLUSÃO DE NÓS ISOLADOS DA AVALIAÇÃO ===")
+    try:
+        stats_analyzer = GraphStatsAnalyzer(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD)
+        isolated_ids = {n["id"] for n in stats_analyzer.get_isolated_nodes()}
+        stats_analyzer.close()
+    except Exception as e:
+        print(f"[AVISO] Não foi possível consultar nós isolados ({e}); prosseguindo sem filtrar.")
+        isolated_ids = set()
+
+    vectors_avaliaveis = [v for v in vectors if v["id"] not in isolated_ids]
+    print(
+        f"[INFO] {len(isolated_ids)} nós isolados excluídos da avaliação "
+        f"({len(vectors_avaliaveis)} de {len(vectors)} nós restantes)."
+    )
+
     # 4. Análise de Similaridade Semântica e Geração do Novo Gráfico
     print("\n=== 4. PROCESSAMENTO ANALÍTICO E VISUAL ===")
-    analyzer = EmbeddingAnalyzer(vectors)
-    
+    analyzer = EmbeddingAnalyzer(vectors_avaliaveis)
+
     # Executa buscas de validação rápida no console para verificar os novos cossenos
     _, _ = analyzer.find_most_similar_by_text("OSTEOMIELITE", top_n=3)
     _, _ = analyzer.find_most_similar_by_text("POI", top_n=3)
 
     print("\n=== 5. PLOTAGEM DO NOVO MAPA DE CLUSTERS ===")
-    visualizer = EmbeddingVisualizer(vectors)
+    visualizer = EmbeddingVisualizer(vectors_avaliaveis)
     
     # Mantemos os mesmos termos de interesse destacados, mas agora mapeados no novo espaço multidimensional
     termos_destaque = ["OSTEOMIELITE", "NÃO ESPECIFICADA", "POI", "LAVAGEM", "CURETA"]
