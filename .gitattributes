@@ -1,0 +1,9 @@
+# Normaliza terminadores de linha para LF, independente do SO de quem faz
+# checkout (evita scripts .sh quebrarem no WSL2 por causa de CRLF vindo de
+# checkout no Windows).
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
