@@ -7,15 +7,15 @@ from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 def extract_clean_triples():
     """
     Conecta ao Neo4j e extrai as triplas estruturadas, 
-    garantindo que apenas arestas com tipo_num válido sejam lidas.
+    garantindo que apenas arestas com tipo válido sejam lidas.
     """
     print("[INFO] Conectando ao Neo4j para extração de triplas clínicas...")
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
     
     query = """
     MATCH (h:Entidade)-[r:CONECTA_A]->(t:Entidade)
-    WHERE r.tipo_num IS NOT NULL
-    RETURN h.text AS head, r.tipo_num AS relation, t.text AS tail
+    WHERE r.tipo IS NOT NULL
+    RETURN h.text AS head, r.tipo AS relation, t.text AS tail
     """
     
     with driver.session() as session:
@@ -25,7 +25,7 @@ def extract_clean_triples():
     driver.close()
     
     if df.empty:
-        raise ValueError("[ERRO] Nenhuma tripla válida com 'tipo_num' foi encontrada no banco.")
+        raise ValueError("[ERRO] Nenhuma tripla válida com 'tipo' foi encontrada no banco.")
         
     df['head'] = df['head'].astype(str)
     df['relation'] = df['relation'].astype(str)
