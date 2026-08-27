@@ -36,49 +36,48 @@ def extract_clean_triples():
 
 def get_clean_metrics(metric_results):
     """
-    Extrai de forma robusta as principais métricas do avaliador do PyKeen,
-    procurando pelas chaves combinadas correspondentes à métrica 'realistic'.
+    Extrai MRR e Hits@1/3/10 da variante 'both.realistic' do PyKeen,
+    casando o nome da metrica pelo segmento EXATO da chave (ex.
+    "both.realistic.hits_at_1"), nao por substring.
+
+    A versao anterior usava `'hits_at_1' in k_lower`, que tambem da match
+    em "hits_at_10" (que contem "hits_at_1" como substring!), fazendo
+    Hits@1 ser sobrescrito pelo valor de Hits@10 sempre que essa chave
+    aparecia depois na iteracao do dict — o sintoma era Hits@1 > Hits@3
+    nos resultados, o que e matematicamente impossivel (se a resposta
+    certa esta no top-1, ela necessariamente esta no top-3 tambem). O
+    guard de "realistic" tambem era frouxo demais: `not any(x in k_lower
+    for x in ['head', 'tail'])` aceitava por engano as variantes
+    'optimistic'/'pessimistic' de 'both', nao so 'realistic'.
     """
     flat = metric_results.to_flat_dict()
     mrr, h1, h3, h10 = 0.0, 0.0, 0.0, 0.0
-    
+
     for k, v in flat.items():
-        k_lower = k.lower()
-        if 'inverse_harmonic_mean_rank' in k_lower or 'mrr' in k_lower:
-            if 'both.realistic' in k_lower or not any(x in k_lower for x in ['head', 'tail']):
-                mrr = v
-        elif 'hits_at_1' in k_lower or ('hits_at_k' in k_lower and k_lower.endswith('.1')):
-            if 'both.realistic' in k_lower or not any(x in k_lower for x in ['head', 'tail']):
-                h1 = v
-        elif 'hits_at_3' in k_lower or ('hits_at_k' in k_lower and k_lower.endswith('.3')):
-            if 'both.realistic' in k_lower or not any(x in k_lower for x in ['head', 'tail']):
-                h3 = v
-        elif 'hits_at_10' in k_lower or ('hits_at_k' in k_lower and k_lower.endswith('.10')):
-            if 'both.realistic' in k_lower or not any(x in k_lower for x in ['head', 'tail']):
-                h10 = v
-                
-    # Fallback de segurança caso a busca estrita 'realistic' venha zerada
-    if mrr == 0.0:
-        for k, v in flat.items():
-            if 'mrr' in k.lower() or 'inverse_harmonic_mean_rank' in k.lower():
-                mrr = v
-                break
-    if h1 == 0.0:
-        for k, v in flat.items():
-            if 'hits_at_1' in k.lower() or 'hits_at_k_1' in k.lower():
-                h1 = v
-                break
-    if h3 == 0.0:
-        for k, v in flat.items():
-            if 'hits_at_3' in k.lower() or 'hits_at_k_3' in k.lower():
-                h3 = v
-                break
-    if h10 == 0.0:
-        for k, v in flat.items():
-            if 'hits_at_10' in k.lower() or 'hits_at_k_10' in k.lower():
-                h10 = v
-                break
-                
+        parts = k.lower().split('.')
+        # Exige 'both' e 'realistic' como segmentos exatos da chave (nao
+        # substring), e casa o nome da metrica pelo ultimo segmento exato.
+        if 'both' not in parts or 'realistic' not in parts:
+            continue
+        metric_name = parts[-1]
+        if metric_name in ('inverse_harmonic_mean_rank', 'mrr'):
+            mrr = v
+        elif metric_name == 'hits_at_1':
+            h1 = v
+        elif metric_name == 'hits_at_3':
+            h3 = v
+        elif metric_name == 'hits_at_10':
+            h10 = v
+
+    if mrr == 0.0 and h1 == 0.0 and h3 == 0.0 and h10 == 0.0:
+        # Nenhuma chave bateu com o formato esperado "both.realistic.<nome>" —
+        # mais provavel indicar uma versao do PyKeen com nomenclatura
+        # diferente do que verificar de novo por substring (o que reintroduz
+        # o bug). Imprime as chaves cruas para diagnostico manual.
+        print("[AVISO] Nenhuma metrica 'both.realistic.*' encontrada. Chaves disponiveis:")
+        for k in sorted(flat.keys()):
+            print(f"    {k}")
+
     return mrr, h1, h3, h10
 
 def main():
