@@ -77,14 +77,22 @@ def process_and_evaluate_space(model_result, label_dict):
     entity_representations = model.entity_representations[0]
     raw_embeddings = entity_representations().cpu().detach().numpy()
     
-    # Equalização do espaço complexo via módulo absoluto (ComplEx/RotatE
-    # usam embeddings de valor complexo; TransE já é real). Isso descarta a
-    # fase do número complexo — que é onde parte da expressividade desses
-    # dois modelos vive (relações antissimétricas, por exemplo) — então a
-    # comparação de clustering pode desfavorecer ComplEx/RotatE frente ao
-    # TransE nativamente real. Registrar essa ressalva ao interpretar.
+    # Conversão do espaço complexo para real (ComplEx/RotatE usam
+    # embeddings de valor complexo; TransE já é real). A versão anterior
+    # usava módulo absoluto (np.abs), que descarta a fase do número
+    # complexo — exatamente onde parte da expressividade desses dois
+    # modelos vive (ex. relações antissimétricas em ComplEx, rotações em
+    # RotatE) — desfavorecendo-os sistematicamente frente ao TransE
+    # nativamente real. Concatenar parte real e imaginária preserva 100%
+    # da informação (um número complexo é totalmente determinado pelo par
+    # (real, imag), diferente do módulo, que é uma projeção com perda),
+    # então a comparação deixa de ter esse viés estrutural. O único efeito
+    # colateral é dobrar a dimensionalidade dos embeddings complexos (de
+    # embedding_dim para 2*embedding_dim) — inofensivo aqui porque
+    # Silhouette/Davies-Bouldin são calculados dentro do espaço de cada
+    # modelo isoladamente, nunca comparando vetores entre modelos.
     if np.iscomplexobj(raw_embeddings) or 'complex' in str(raw_embeddings.dtype):
-        vector_matrix = np.abs(raw_embeddings)
+        vector_matrix = np.concatenate([raw_embeddings.real, raw_embeddings.imag], axis=1)
     else:
         vector_matrix = raw_embeddings
 
