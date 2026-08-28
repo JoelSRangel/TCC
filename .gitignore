@@ -14,3 +14,7 @@ neo4j/data/
 # Logs e configurações do VS Code
 .vscode/
 *.log
+
+# Resultados de benchmark (relatados no texto do TCC, nao versionados)
+results/clustering_resultados.json
+results/link_prediction_resultados.json
