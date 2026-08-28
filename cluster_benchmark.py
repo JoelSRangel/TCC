@@ -1,3 +1,7 @@
+import json
+import os
+import statistics
+
 import numpy as np
 import pandas as pd
 from neo4j import GraphDatabase
@@ -5,6 +9,15 @@ from pykeen.triples import TriplesFactory
 from pykeen.pipeline import pipeline
 from sklearn.metrics import silhouette_score, davies_bouldin_score
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
+
+# Numero de execucoes independentes por modelo (uma por seed) — mesmo
+# motivo do compare_models.py: sem seed fixa, dois runs do mesmo modelo
+# davam numeros diferentes, e as diferencas entre TransE/ComplEx/RotatE
+# aqui sao pequenas o suficiente (na primeira rodada real, Silhouette
+# variou so entre -0.317 e -0.349) para que ruido de inicializacao pudesse
+# mudar o ranking. Reportamos media +/- desvio padrao.
+SEEDS = [0, 1, 2, 3, 4]
+
 
 def extract_triples_and_labels():
     """
@@ -41,115 +54,162 @@ def extract_triples_and_labels():
     df_labels['id'] = df_labels['id'].astype(str)
     df_labels['tag'] = df_labels['tag'].astype(str)
     
-    # Chave = id do conceito (texto normalizado + categoria semantica, ex.
-    # "FRATURA|Disease"), a mesma identidade usada na ingestao do grafo
-    # (src/extractor.py::_concept_key na main) — nao mais o texto puro, que
-    # colapsaria conceitos homonimos de categorias diferentes.
     label_dict = dict(zip(df_labels['id'], df_labels['tag']))
     
     print(f"[SUCESSO] {len(df_triples)} triplas clínicas e {len(label_dict)} mapeamentos de categorias carregados.")
     return df_triples, label_dict
 
+
 def process_and_evaluate_space(model_result, label_dict):
     """
-    Passo 3 e Passo 4: Extrai os embeddings, aplica a conversão do módulo complexo 
-    se necessário e calcula as métricas de validação de cluster reais.
+    Extrai os embeddings, equaliza o espaço complexo (se necessário) e
+    calcula Silhouette/Davies-Bouldin usando tag_type como rótulo.
+
+    IMPORTANTE (limitação metodológica, ver item 5 do plano de ação): isto
+    mede o quanto o espaço de embedding separa entidades pela categoria
+    semântica JÁ EXISTENTE no corpus (tag_type), não por clusters
+    descobertos via K-means. É uma métrica válida de "separabilidade por
+    rótulo externo", mas não substitui um K-sweep de verdade.
     """
     model = model_result.model
     triples_factory = model_result.training
     
-    # 1. Extrair os embeddings de entidades do modelo do PyKeen
     entity_representations = model.entity_representations[0]
-    # Retorna o array de pesos (pode conter tensores complexos do PyTorch)
     raw_embeddings = entity_representations().cpu().detach().numpy()
     
-    # PASSO 3: Equalização do Espaço Complexo via Módulo Absoluto
+    # Equalização do espaço complexo via módulo absoluto (ComplEx/RotatE
+    # usam embeddings de valor complexo; TransE já é real). Isso descarta a
+    # fase do número complexo — que é onde parte da expressividade desses
+    # dois modelos vive (relações antissimétricas, por exemplo) — então a
+    # comparação de clustering pode desfavorecer ComplEx/RotatE frente ao
+    # TransE nativamente real. Registrar essa ressalva ao interpretar.
     if np.iscomplexobj(raw_embeddings) or 'complex' in str(raw_embeddings.dtype):
-        # Transforma o plano complexo em vetor de magnitudes reais
         vector_matrix = np.abs(raw_embeddings)
     else:
         vector_matrix = raw_embeddings
 
-    # Alinhar os rótulos clínicos com os IDs internos do PyKeen
     ordered_tags = []
     valid_indices = []
     
     for entity_label, entity_id in triples_factory.entity_to_id.items():
-        # entity_label e o id do conceito (texto+categoria), nao mais o
-        # texto puro — busca a tag original do Neo4j para aquele conceito
         tag = label_dict.get(entity_label, "Unknown")
-        # Ignora nós sem categoria ou não mapeados para não distorcer a estatística
         if tag != "Unknown" and tag != "None":
             ordered_tags.append(tag)
             valid_indices.append(entity_id)
             
-    # Filtra as matrizes para conter apenas elementos com rótulos clínicos válidos
     X = vector_matrix[valid_indices]
     y = np.array(ordered_tags)
+
+    # Normalização L2: silhouette_score(metric='cosine') já é invariante à
+    # escala dos vetores, mas davies_bouldin_score do scikit-learn SEMPRE
+    # usa distância Euclidiana (não aceita parâmetro de métrica) — sem
+    # normalizar, essa métrica fica sensível à norma bruta dos embeddings,
+    # que difere estruturalmente entre TransE (real) e ComplEx/RotatE
+    # (módulo de número complexo), tornando a comparação entre modelos
+    # não-equitativa. Normalizando cada vetor para norma 1 antes das duas
+    # métricas, a distância Euclidiana entre vetores unitários vira uma
+    # função monotônica da distância de cosseno
+    # (||a-b||^2 = 2 - 2*cos(a,b)), então Davies-Bouldin passa a refletir
+    # a mesma geometria do Silhouette, em vez de uma geometria diferente.
+    norms = np.linalg.norm(X, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0  # evita divisão por zero em vetores nulos
+    X_normalizado = X / norms
     
-    # PASSO 4: Teste Estatístico de Coesão e Separação
-    # Garante que temos múltiplos clusters válidos para calcular as métricas
     if len(set(y)) > 1:
-        sil = silhouette_score(X, y, metric='cosine', sample_size=3000, random_state=42)
-        db = davies_bouldin_score(X, y)
+        sil = silhouette_score(X_normalizado, y, metric='cosine', sample_size=3000, random_state=42)
+        db = davies_bouldin_score(X_normalizado, y)
         return sil, db
     else:
         return 0.0, 0.0
 
+
+def run_single(model_name, triples_factory, label_dict, seed):
+    result = pipeline(
+        training=triples_factory,
+        testing=triples_factory,
+        model=model_name,
+        model_kwargs=dict(embedding_dim=64),
+        training_kwargs=dict(num_epochs=10, batch_size=256),
+        random_seed=seed,
+        device='cpu',
+    )
+    return process_and_evaluate_space(result, label_dict)
+
+
+def summarize(values):
+    mean = statistics.fmean(values)
+    std = statistics.pstdev(values) if len(values) > 1 else 0.0
+    return mean, std
+
+
 def main():
     print("=================================================================")
     print("     BENCHMARK COMPARATIVO QUANTITATIVO: NODE CLUSTERING")
-    print("=================================================================\n")
+    print(f"     ({len(SEEDS)} execucoes por modelo, seeds={SEEDS})")
+    print("=================================================================")
+    print("[AVISO METODOLOGICO] Esta tabela mede separabilidade por categoria")
+    print("semantica JA EXISTENTE (tag_type), nao clusters descobertos via")
+    print("K-means. Ver item 5 do plano de acao para o K-sweep de verdade.\n")
     
     try:
-        # 1. Obter os dados (Passo 2)
+        # 1. Obter os dados
         df_triples, label_dict = extract_triples_and_labels()
         triples_factory = TriplesFactory.from_labeled_triples(
             triples=df_triples[['head', 'relation', 'tail']].values
         )
         
         models_to_test = ['TransE', 'ComplEx', 'RotatE']
-        comparison_table = []
+        raw_runs = []
+        summary_table = []
         
-        # 2. Execução dos Treinamentos Globais Cheios
+        # 2. Execução dos Treinamentos, N execuções por modelo
         for model_name in models_to_test:
-            print(f"\n[MODELO: {model_name}] Otimizando espaço latente e coletando métricas geométricas...")
-            try:
-                result = pipeline(
-                    training=triples_factory,
-                    testing=triples_factory,
-                    model=model_name,
-                    model_kwargs=dict(embedding_dim=64),
-                    training_kwargs=dict(num_epochs=10, batch_size=256),
-                    device='cpu'
-                )
-                
-                # Executa a equalização e a validação estatística (Passos 3 e 4)
-                sil, db = process_and_evaluate_space(result, label_dict)
-                
-                comparison_table.append({
-                    'Modelo': model_name,
-                    'Silhouette': sil,
-                    'Davies-Bouldin': db
-                })
-                print(f"[SUCESSO] Avaliação espacial do {model_name} concluída.")
-                
-            except Exception as e_model:
-                print(f"[ERRO NO MODELO {model_name}] Falha na clusterização: {e_model}")
-                comparison_table.append({
-                    'Modelo': model_name, 'Silhouette': 0.0, 'Davies-Bouldin': 0.0
-                })
+            print(f"\n[MODELO: {model_name}] Otimizando espaço latente em {len(SEEDS)} execuções independentes...")
+            sils, dbs = [], []
+            for seed in SEEDS:
+                print(f"  [seed={seed}] treinando e avaliando espaço latente...")
+                try:
+                    sil, db = run_single(model_name, triples_factory, label_dict, seed)
+                except Exception as e_seed:
+                    print(f"  [ERRO seed={seed}] Falha nesta execução: {e_seed}")
+                    sil, db = 0.0, 0.0
+                print(f"    -> Silhouette={sil:.4f}  Davies-Bouldin={db:.4f}")
+                sils.append(sil); dbs.append(db)
+                raw_runs.append({'modelo': model_name, 'seed': seed, 'silhouette': sil, 'davies_bouldin': db})
 
-        # 3. Consolidação e Exibição da Tabela Final (Passo 5)
-        print("\n" + "="*65)
-        print("          TABELA COMPARATIVA DE CLUSTERIZAÇÃO SEMÂNTICA")
-        print("="*65)
-        print(f"{'Modelo':<15} | {'Silhouette Score (↑)':<22} | {'Davies-Bouldin (↓)':<20}")
-        print("-"*65)
-        for row in comparison_table:
-            print(f"{row['Modelo']:<15} | {row['Silhouette']:<22.4f} | {row['Davies-Bouldin']:<20.4f}")
-        print("="*65)
+            sil_mean, sil_std = summarize(sils)
+            db_mean, db_std = summarize(dbs)
+            summary_table.append({
+                'Modelo': model_name,
+                'Silhouette_media': sil_mean, 'Silhouette_desvio': sil_std,
+                'DaviesBouldin_media': db_mean, 'DaviesBouldin_desvio': db_std,
+            })
+            print(f"[SUCESSO] {model_name}: {len(SEEDS)} execuções concluídas.")
+
+        # 3. Consolidação e Exibição da Tabela Final (média ± desvio padrão)
+        print("\n" + "="*80)
+        print("  TABELA COMPARATIVA DE CLUSTERIZAÇÃO SEMÂNTICA — média ± desvio, N=" + str(len(SEEDS)))
+        print("="*80)
+        print(f"{'Modelo':<10} | {'Silhouette (↑)':<22} | {'Davies-Bouldin (↓)':<22}")
+        print("-"*80)
+        for row in summary_table:
+            print(
+                f"{row['Modelo']:<10} | "
+                f"{row['Silhouette_media']:.4f} ± {row['Silhouette_desvio']:.4f}      | "
+                f"{row['DaviesBouldin_media']:.4f} ± {row['DaviesBouldin_desvio']:.4f}"
+            )
+        print("="*80)
         print("\n[SUCESSO] Node clustering concluído!")
+
+        # 4. Salva execuções individuais + resumo para auditoria/reprodutibilidade
+        os.makedirs("results", exist_ok=True)
+        output_path = os.path.join("results", "clustering_resultados.json")
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {"seeds": SEEDS, "execucoes_individuais": raw_runs, "resumo": summary_table},
+                f, ensure_ascii=False, indent=2,
+            )
+        print(f"[SUCESSO] Resultados detalhados (todas as execuções + resumo) salvos em: {output_path}")
         
     except Exception as e:
         print(f"\n[ERRO GERAL] Falha no pipeline de clustering: {e}")
