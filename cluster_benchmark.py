@@ -20,17 +20,64 @@ from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 SEEDS = [0, 1, 2, 3, 4]
 
 # Valores de K testados no K-means real (item 5 do plano de acao). O valor
-# igual ao numero de categorias tag_type distintas no corpus e adicionado
-# dinamicamente em main(), para servir de ponto de comparacao com a
-# analise de separabilidade por categoria pre-existente (ver
-# tag_type_metrics abaixo).
+# igual ao numero de categorias tag_type distintas no corpus (ja
+# normalizadas, ver normalize_tag() abaixo) e adicionado dinamicamente em
+# main(), para servir de ponto de comparacao com a analise de
+# separabilidade por categoria pre-existente (ver tag_type_metrics abaixo).
 K_VALUES_BASE = [5, 10, 15, 20, 25, 30]
+
+# Marcadores de anotacao do SemClinBr que descrevem uma propriedade da
+# mencao (forma abreviada, polaridade negada), nao uma categoria clinica em
+# si. Quando aparecem combinados a um tipo semantico mais substantivo (ex.:
+# "Abbreviation|Laboratory or Test Result"), sao descartados por
+# normalize_tag() para que o rotulo usado no clustering reflita a
+# categoria clinica da entidade, nao o marcador.
+_TAG_MODIFIERS = {"Abbreviation", "Negation"}
+
+
+def normalize_tag(raw_tag):
+    """
+    O atributo bruto 'tag' do XML do SemClinBr pode vir composto por
+    multiplos tipos semanticos separados por '|' (ex.: uma substancia que e
+    ao mesmo tempo "Organic Chemical" e "Pharmacologic Substance"), em
+    ordem inconsistente entre anotacoes equivalentes (tanto
+    "Finding|Abbreviation" quanto "Abbreviation|Finding" ocorrem no
+    corpus). Usado sem normalizacao, produz ~922 rotulos distintos no
+    corpus atual — nao 23 categorias, como se assumia antes de conferir os
+    dados (ver plano de acao, secao "Item 5").
+
+    Esta funcao reduz cada anotacao a um unico rotulo de categoria clinica,
+    dos 89 tipos semanticos base observados no corpus:
+      1. remove tags duplicadas dentro da mesma anotacao (ex.:
+         "Negation|Negation" -> "Negation");
+      2. descarta os marcadores _TAG_MODIFIERS da lista, mantendo o
+         primeiro tipo semantico substantivo restante;
+      3. se so sobrar marcador (ou a tag for so um marcador), usa o
+         marcador como categoria residual, em vez de descartar a entidade.
+
+    Validado contra os XMLs brutos do corpus: reduz as 922 combinacoes
+    distintas para 85 categorias (dos 89 tipos semanticos base possiveis;
+    os 4 que faltam — Amino Acid Sequence, Behavior, Plant, Vitamin — so
+    aparecem combinados atras de outro tipo mais frequente na mesma
+    anotacao, e acabam absorvidos por ele; afeta poucas dezenas de
+    anotacoes no corpus, documentado como limitacao no texto).
+    """
+    parts = []
+    for part in raw_tag.split("|"):
+        if part not in parts:
+            parts.append(part)
+
+    substantive = [p for p in parts if p not in _TAG_MODIFIERS]
+    if substantive:
+        return substantive[0]
+    return parts[0] if parts else raw_tag
 
 
 def extract_triples_and_labels():
     """
     1. Extrai as triplas para o treinamento cheio do PyKeen.
-    2. Extrai os rótulos de categoria (tag_type) de cada entidade para o clustering.
+    2. Extrai os rótulos de categoria (tag_type) de cada entidade para o
+       clustering, normalizados por normalize_tag() (ver docstring acima).
     """
     print("[INFO] Conectando ao Neo4j para extração de topologia e metadados...")
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
@@ -60,7 +107,7 @@ def extract_triples_and_labels():
 
     df_triples = df_triples.astype(str)
     df_labels['id'] = df_labels['id'].astype(str)
-    df_labels['tag'] = df_labels['tag'].astype(str)
+    df_labels['tag'] = df_labels['tag'].astype(str).apply(normalize_tag)
 
     label_dict = dict(zip(df_labels['id'], df_labels['tag']))
 
@@ -69,9 +116,10 @@ def extract_triples_and_labels():
 
 
 def count_valid_tags(label_dict):
-    """Numero de categorias tag_type distintas no corpus, excluindo os
-    marcadores 'Unknown'/'None'. Usado so para incluir esse valor no
-    sweep de K, como ponto de comparacao com a analise por tag_type."""
+    """Numero de categorias tag_type distintas no corpus (ja normalizadas
+    por normalize_tag()), excluindo os marcadores 'Unknown'/'None'. Usado
+    so para incluir esse valor no sweep de K, como ponto de comparacao com
+    a analise por tag_type."""
     tags = {t for t in label_dict.values() if t not in ("Unknown", "None")}
     return len(tags)
 
@@ -200,7 +248,7 @@ def main():
 
         n_tags = count_valid_tags(label_dict)
         K_VALUES = sorted(set(K_VALUES_BASE + [n_tags]))
-        print(f"[INFO] Categorias tag_type distintas no corpus: {n_tags}.")
+        print(f"[INFO] Categorias tag_type distintas no corpus (normalizadas, ver normalize_tag): {n_tags}.")
         print(f"[INFO] Valores de K testados no K-means: {K_VALUES}\n")
 
         models_to_test = ['TransE', 'ComplEx', 'RotatE']
