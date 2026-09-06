@@ -18,3 +18,10 @@ neo4j/data/
 # Resultados de benchmark (relatados no texto do TCC, nao versionados)
 results/clustering_resultados.json
 results/link_prediction_resultados.json
+
+# Artefatos do prototipo de RAG (item 8) -- regeneraveis via
+# 'python treinar_embeddings_rag.py', nao versionados (mesmo criterio dos
+# outros arquivos de results/ acima: os embeddings sao um artefato de
+# execucao, nao codigo).
+results/rag_embeddings.npz
+results/rag_entity_metadata.json

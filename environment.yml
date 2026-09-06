@@ -13,6 +13,8 @@ dependencies:
       - neo4j
       - pykeen
       - python-dotenv
+      - streamlit
+      - requests
 # Observação: as versões exatas usadas antes da reinstalação do Windows foram
 # perdidas (não havia environment.yml/requirements.txt versionado no repositório
 # até agora). Depois de confirmar que `python main.py` roda sem erro com este
