@@ -29,6 +29,17 @@ from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 EMBEDDINGS_PATH = os.path.join("results", "rag_embeddings.npz")
 METADATA_PATH = os.path.join("results", "rag_entity_metadata.json")
 
+# Similaridade de cosseno minima para um vizinho semantico entrar no
+# contexto. Achado ao testar o prototipo (pergunta sobre "QUEIXA", ver
+# plano de acao): os vizinhos mais proximos no espaco RotatE apareciam com
+# similaridade de ~0,29-0,35 (escala -1 a 1) -- fraca em termos absolutos,
+# mas o LLM tratava esse numero como evidencia forte por vir quantificado,
+# e chegava a preferi-lo a uma relacao direta do grafo (evidencia bem mais
+# confiavel). Filtrar abaixo deste limiar evita apresentar ruido do espaco
+# latente como se fosse sinal -- consistente com o proprio Silhouette baixo
+# medido nos itens 4/5 (o espaco nao e fortemente discriminativo).
+SIMILARIDADE_MINIMA = 0.5
+
 
 class GraphRAGRetriever:
     def __init__(self):
@@ -91,7 +102,7 @@ class GraphRAGRetriever:
             registros = list(session.run(query, id=entity_id, limite=limite))
         return [dict(r) for r in registros]
 
-    def vizinhos_semanticos(self, entity_id, top_k=5):
+    def vizinhos_semanticos(self, entity_id, top_k=5, similaridade_minima=SIMILARIDADE_MINIMA):
         """
         Vizinhos mais proximos no espaco RotatE (cosseno; os vetores ja
         estao normalizados L2 pelo treinamento, entao o produto interno e
@@ -99,6 +110,13 @@ class GraphRAGRetriever:
         entidade. Evidencia que a busca puramente estrutural (so arestas
         explicitas) nao captura: conceitos semanticamente parecidos mesmo
         sem relacao direta anotada no corpus.
+
+        Descarta candidatos com similaridade abaixo de
+        `similaridade_minima` (ver SIMILARIDADE_MINIMA acima) -- um vizinho
+        "mais proximo" ainda pode estar longe em termos absolutos, e nesse
+        caso e melhor nao devolver nada do que devolver ruido travestido de
+        evidencia quantificada. Pode retornar uma lista vazia (entidade sem
+        vizinhos suficientemente proximos no espaco latente).
         """
         if entity_id not in self.id_to_index:
             return []
@@ -112,26 +130,32 @@ class GraphRAGRetriever:
             candidato_id = self.ids[i]
             if candidato_id == entity_id:
                 continue
+            sim = float(similaridades[i])
+            if sim < similaridade_minima:
+                # ordem e decrescente por similaridade -- assim que cai
+                # abaixo do limiar, todo o resto tambem cai.
+                break
             meta = self.metadata.get(candidato_id, {})
             resultados.append({
                 "id": candidato_id,
                 "text": meta.get("text"),
                 "tag_type": meta.get("tag_type"),
-                "similaridade": float(similaridades[i]),
+                "similaridade": sim,
             })
             if len(resultados) >= top_k:
                 break
         return resultados
 
     def montar_contexto(self, pergunta, max_entidades=3, vizinhos_diretos_por_entidade=5,
-                         vizinhos_semanticos_por_entidade=5):
+                         vizinhos_semanticos_por_entidade=5, similaridade_minima=SIMILARIDADE_MINIMA):
         """
         Orquestra a recuperacao: identifica entidades mencionadas na
         pergunta, busca vizinhos diretos (estrutural) e semanticos
-        (embeddings) para cada uma, e monta o texto de contexto em
-        portugues a ser injetado no prompt do LLM. Retorna (contexto_texto,
-        detalhes) -- detalhes e usado pela interface para exibir o que foi
-        recuperado, separado da resposta final do LLM.
+        (embeddings, filtrados por similaridade_minima) para cada uma, e
+        monta o texto de contexto em portugues a ser injetado no prompt do
+        LLM. Retorna (contexto_texto, detalhes) -- detalhes e usado pela
+        interface para exibir o que foi recuperado, separado da resposta
+        final do LLM.
         """
         entidades = self.encontrar_entidades_mencionadas(pergunta, max_entidades=max_entidades)
 
@@ -151,7 +175,9 @@ class GraphRAGRetriever:
                 else:
                     linhas_contexto.append(f"{v['text']} ({v['tag_type']}) --[{v['relacao']}]--> {texto_entidade}")
 
-            semanticos = self.vizinhos_semanticos(entity_id, top_k=vizinhos_semanticos_por_entidade)
+            semanticos = self.vizinhos_semanticos(
+                entity_id, top_k=vizinhos_semanticos_por_entidade, similaridade_minima=similaridade_minima
+            )
             detalhes["vizinhos_semanticos"][entity_id] = semanticos
             for v in semanticos:
                 linhas_contexto.append(

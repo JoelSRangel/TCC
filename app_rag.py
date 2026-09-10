@@ -16,7 +16,7 @@ Rodar com: streamlit run app_rag.py
 """
 import streamlit as st
 
-from rag_retriever import GraphRAGRetriever
+from rag_retriever import GraphRAGRetriever, SIMILARIDADE_MINIMA
 from rag_llm import gerar_resposta
 
 st.set_page_config(page_title="RAG sobre o Grafo Clinico SemClinBr", layout="wide")
@@ -40,6 +40,15 @@ with st.sidebar:
     max_entidades = st.slider("Max. de entidades reconhecidas na pergunta", 1, 5, 3)
     vizinhos_diretos_n = st.slider("Vizinhos diretos por entidade", 1, 10, 5)
     vizinhos_semanticos_n = st.slider("Vizinhos semanticos (embeddings) por entidade", 1, 10, 5)
+    similaridade_minima = st.slider(
+        "Similaridade minima p/ vizinho semantico entrar no contexto",
+        0.0, 1.0, SIMILARIDADE_MINIMA, step=0.05,
+        help=(
+            "Filtra vizinhos do espaco de embeddings abaixo desse cosseno. "
+            "Baixar o valor traz mais sugestoes (porem mais fracas/ruidosas); "
+            "subir deixa so vizinhos fortes passarem (podendo sobrar nenhum)."
+        ),
+    )
 
 try:
     retriever = carregar_retriever()
@@ -59,6 +68,7 @@ if st.button("Perguntar", type="primary") and pergunta.strip():
             max_entidades=max_entidades,
             vizinhos_diretos_por_entidade=vizinhos_diretos_n,
             vizinhos_semanticos_por_entidade=vizinhos_semanticos_n,
+            similaridade_minima=similaridade_minima,
         )
 
     if not detalhes["entidades_reconhecidas"]:

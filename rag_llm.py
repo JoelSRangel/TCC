@@ -11,6 +11,15 @@ extraido de um Grafo de Conhecimento Clinico construido a partir do corpus \
 SemClinBr. Se o contexto nao for suficiente para responder, diga isso \
 explicitamente em vez de inventar informacao.
 
+O contexto tem duas fontes, com confiabilidade diferente. Linhas no formato \
+"A --[relacao]--> B" vem de anotacoes reais do corpus: trate-as como \
+evidencia forte. Linhas no formato "A e semanticamente proximo de B \
+[similaridade=X]" vem de um espaco vetorial aproximado: trate-as como \
+evidencia mais fraca e apenas exploratoria, mesmo quando X parecer um \
+numero razoavel -- nunca escolha uma dessas linhas como "a mais \
+relacionada" apenas por ter um numero, se houver uma relacao direta \
+disponivel que ja responda a pergunta.
+
 Contexto (relacoes e conceitos do grafo):
 {contexto}
 
