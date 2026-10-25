@@ -24,7 +24,13 @@ SEEDS = [0, 1, 2, 3, 4]
 # normalizadas, ver normalize_tag() abaixo) e adicionado dinamicamente em
 # main(), para servir de ponto de comparacao com a analise de
 # separabilidade por categoria pre-existente (ver tag_type_metrics abaixo).
-K_VALUES_BASE = [5, 10, 15, 20, 25, 30]
+#
+# K=2, 3 e 4 incluidos a pedido do orientador (ponto 3 do feedback da
+# banca, que sugeriu testar "2, 3, ..., 10"): e nessa faixa baixa que um
+# agrupamento natural apareceria, se existir. Sem esses valores, a
+# afirmacao de que o espaco nao tem granularidade natural de agrupamento
+# ficava apoiada so na faixa de K >= 5.
+K_VALUES_BASE = [2, 3, 4, 5, 10, 15, 20, 25, 30]
 
 # Marcadores de anotacao do SemClinBr que descrevem uma propriedade da
 # mencao (forma abreviada, polaridade negada), nao uma categoria clinica em
