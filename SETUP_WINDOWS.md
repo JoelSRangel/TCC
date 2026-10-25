@@ -59,7 +59,7 @@ comite o resultado, para travar as versões que efetivamente funcionaram.
 
 ```bash
 cp .env.example .env
-# edite .env e confirme/ajuste a senha (o valor que você já usava é joel2004)
+# edite .env e defina em NEO4J_PASSWORD a senha do seu Neo4j
 ```
 
 O `.env` já está no `.gitignore` — não é enviado ao GitHub. `config.py` agora
