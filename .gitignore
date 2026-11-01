@@ -15,6 +15,6 @@ neo4j/data/
 .vscode/
 *.log
 
-# Resultados de benchmark (relatados no texto do TCC, nao versionados)
-results/clustering_resultados.json
-results/link_prediction_resultados.json
+# Saidas dos benchmarks e experimentos (geradas pelos scripts, nao versionadas).
+# Varias tem texto das notas do SemClinBr, e o repositorio e publico.
+results/
