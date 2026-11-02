@@ -54,6 +54,20 @@ def linha(nome, m):
             f" | AMRI {m['AMRI']:.4f}")
 
 
+def avaliar_referencias(treino, validacao, teste):
+    """Cada referência de REFERENCIAS no teste, avaliada como os modelos do experimento 1 (o 6 usa
+    a mesma função nos grafos do 5g)."""
+    resultados = {}
+    for nome, parametros in REFERENCIAS.items():
+        modelo = MarginalDistributionBaseline(triples_factory=treino, **parametros)
+        # O avaliador do PyKEEN 1.11 descobre o dispositivo pelos parâmetros ou buffers do modelo,
+        # e as referências não têm nenhum: um buffer vazio resolve, sem mudar os escores.
+        modelo.register_buffer("dispositivo", torch.empty(0))
+        total, por_relacao = retreino.avaliar_teste(modelo, treino, validacao, teste)
+        resultados[nome] = {"teste": total, "teste_por_relacao": por_relacao}
+    return resultados
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8", line_buffering=True)
     logging.getLogger("pykeen").setLevel(logging.ERROR)
@@ -66,14 +80,7 @@ def main():
           f" {teste.num_triples} teste | entidades: {treino.num_entities}")
 
     dados = {"referencias": REFERENCIAS, "referencia_ao_acaso": retreino.referencia_ao_acaso(treino.num_entities),
-             "resultados": {}}
-    for nome, parametros in REFERENCIAS.items():
-        modelo = MarginalDistributionBaseline(triples_factory=treino, **parametros)
-        # O avaliador do PyKEEN 1.11 descobre o dispositivo pelos parâmetros ou buffers do modelo,
-        # e as referências não têm nenhum: um buffer vazio resolve, sem mudar os escores.
-        modelo.register_buffer("dispositivo", torch.empty(0))
-        total, por_relacao = retreino.avaliar_teste(modelo, treino, validacao, teste)
-        dados["resultados"][nome] = {"teste": total, "teste_por_relacao": por_relacao}
+             "resultados": avaliar_referencias(treino, validacao, teste)}
     retreino.salvar_json(dados, SAIDA_JSON)
 
     print("\n== Teste, todas as triplas")

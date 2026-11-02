@@ -217,17 +217,35 @@ def salvar_json(dados, caminho):
         json.dump(dados, f, ensure_ascii=False, indent=2)
 
 
+def chave_execucao(registro):
+    """Modelo, configuração e semente de uma execução (na seleção, a semente fica None)."""
+    return tuple(registro.get(k) for k in ("modelo", "dimensao", "perda", "negativos", "taxa", "semente"))
+
+
+def execucoes_salvas(dados, caminho):
+    """As execuções sem erro já gravadas no JSON de uma rodada interrompida, se o protocolo for o mesmo."""
+    if not os.path.isfile(caminho):
+        return {}
+    with open(caminho, encoding="utf-8") as f:
+        anterior = json.load(f)
+    for campo in ("grade", "versoes", "protocolo", "triplas"):
+        if anterior.get(campo) != json.loads(json.dumps(dados[campo])):
+            raise ValueError(f"o campo {campo} de {os.path.relpath(caminho, RAIZ)} é outro; não dá para retomar")
+    return {chave_execucao(r): r for r in anterior["selecao"] + anterior["final"] if "erro" not in r}
+
+
 def descricao(c):
     return f"{c['perda']:13s} {c['negativos']:2d} neg. taxa {c['taxa']}"
 
 
-def modo_rapido(treino, validacao, teste):
-    """Treina cada modelo por poucas épocas, testa todo o código e estima o tempo."""
+def modo_rapido(treino, validacao, teste, nome_grade="basica"):
+    """Treina cada modelo da grade por poucas épocas, testa todo o código e estima o tempo da grade."""
+    grade = GRADES[nome_grade]
     epocas = 20
     print(f"\nModo rápido: 1 configuração por modelo (softplus, 16 negativos), {epocas} épocas, semente 0.")
     print("Os números abaixo servem só para conferir o código; não são resultados.\n")
     estimativas = {}
-    for rotulo, modelo_pykeen, dimensao in GRADES["basica"]["modelos"]:
+    for rotulo, modelo_pykeen, dimensao in grade["modelos"]:
         modelo, info = treinar(modelo_pykeen, dimensao, "softplus", 16, 0.001, 0, treino, validacao, epocas)
         total, por_relacao = avaliar_teste(modelo, treino, validacao, teste)
         por_epoca = info["segundos"] / max(info["epocas_treinadas"], 1)
@@ -238,19 +256,22 @@ def modo_rapido(treino, validacao, teste):
         for relacao, m in por_relacao.items():
             print(f"            {relacao}: {m['triplas']} triplas, MRR {m['MRR']:.4f}"
                   f" (origem {m['MRR_origem']:.4f}, destino {m['MRR_destino']:.4f})")
-    grade = GRADES["basica"]
     execucoes = len(grade["perdas"]) * len(grade["negativos"]) * len(grade["taxas"]) + len(SEMENTES_FINAIS)
     pior = sum(execucoes * MAX_EPOCAS * t for t in estimativas.values())
     provavel = sum(execucoes * 100 * t for t in estimativas.values())
-    print(f"\nEstimativa da grade básica ({execucoes} execuções por modelo):")
+    print(f"\nEstimativa da grade {nome_grade} ({execucoes} execuções por modelo):")
     print(f"   se a parada antecipada agir por volta da época 100: {provavel / 3600:.1f} h")
     print(f"   pior caso, todas as execuções até {MAX_EPOCAS} épocas: {pior / 3600:.1f} h")
 
 
-def modo_completo(nome_grade, treino, validacao, teste):
+def modo_completo(nome_grade, treino, validacao, teste, prefixo=None, extras=None, retomar=False):
+    """Seleção e avaliação final da grade. Com prefixo e extras, outro experimento (o 6) usa o mesmo
+    protocolo em outro grafo, com as saídas em outros arquivos e informações a mais no JSON. Com
+    retomar, as execuções já gravadas no JSON (de uma rodada interrompida) não são treinadas de novo."""
     grade = GRADES[nome_grade]
-    saida_json = os.path.join(RAIZ, "results", f"{grade['prefixo']}_resultados.json")
-    pasta_vetores = os.path.join(RAIZ, "results", f"{grade['prefixo']}_vetores")
+    prefixo = prefixo or grade["prefixo"]
+    saida_json = os.path.join(RAIZ, "results", f"{prefixo}_resultados.json")
+    pasta_vetores = os.path.join(RAIZ, "results", f"{prefixo}_vetores")
     configuracoes = [{"perda": p, "negativos": n, "taxa": t}
                      for p, n, t in itertools.product(grade["perdas"], grade["negativos"], grade["taxas"])]
     dados = {
@@ -264,15 +285,25 @@ def modo_completo(nome_grade, treino, validacao, teste):
         "triplas": {"treino": treino.num_triples, "validacao": validacao.num_triples,
                     "teste": teste.num_triples, "entidades": treino.num_entities},
         "referencia_ao_acaso": referencia_ao_acaso(treino.num_entities),
+        **(extras or {}),
         "selecao": [], "final": [], "resumo": {},
     }
+    salvas = execucoes_salvas(dados, saida_json) if retomar else {}
     print(f"Grade {nome_grade}: {len(configuracoes)} configurações por modelo,"
           f" {len(grade['modelos'])} modelos")
+    if retomar:
+        print(f"Retomada: {len(salvas)} execuções já salvas em {os.path.relpath(saida_json, RAIZ)}")
     for rotulo, modelo_pykeen, dimensao in grade["modelos"]:
         print(f"\n== {rotulo} (dimensão {dimensao}): seleção da configuração (semente {SEMENTE_SELECAO})")
         candidatos = []
         for c in configuracoes:
             registro = {"modelo": rotulo, "dimensao": dimensao, **c}
+            salva = salvas.get(chave_execucao(registro))
+            if salva is not None:  # treinada antes da interrupção
+                candidatos.append(salva)
+                dados["selecao"].append(salva)
+                print(f"   {descricao(c)}: MRR validação {salva['mrr_validacao']:.4f} (já salva)")
+                continue
             try:
                 _, info = treinar(modelo_pykeen, dimensao, c["perda"], c["negativos"], c["taxa"],
                                   SEMENTE_SELECAO, treino, validacao, MAX_EPOCAS)
@@ -298,6 +329,12 @@ def modo_completo(nome_grade, treino, validacao, teste):
         execucoes = []
         for semente in SEMENTES_FINAIS:
             registro = {"modelo": rotulo, "dimensao": dimensao, **config, "semente": semente}
+            salva = salvas.get(chave_execucao(registro))
+            if salva is not None:
+                execucoes.append(salva)
+                dados["final"].append(salva)
+                print(f"   semente {semente}: MRR {salva['teste']['MRR']:.4f} (já salva)")
+                continue
             try:
                 modelo, info = treinar(modelo_pykeen, dimensao, config["perda"], config["negativos"],
                                        config["taxa"], semente, treino, validacao, MAX_EPOCAS)
@@ -336,6 +373,7 @@ def modo_completo(nome_grade, treino, validacao, teste):
               f" | AMRI {t['AMRI']['media']:.4f} ({r['execucoes_validas']} execuções válidas;"
               f" {descricao(r['configuracao'])})")
     print(f"\nResultados completos em {os.path.relpath(saida_json, RAIZ)}")
+    return dados
 
 
 def main():
@@ -360,7 +398,7 @@ def main():
           f" {teste.num_triples} teste) | entidades: {fabrica.num_entities}")
 
     if args.rapido:
-        modo_rapido(treino, validacao, teste)
+        modo_rapido(treino, validacao, teste, args.grade)
     else:
         modo_completo(args.grade, treino, validacao, teste)
 
