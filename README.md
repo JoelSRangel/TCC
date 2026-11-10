@@ -12,12 +12,12 @@ A tabela lista as formas de usar essas técnicas em qualquer grafo de conhecimen
 |---|---|---|---|
 | 1 | Completar o grafo (*link prediction*) | Dado (losartana, trata, ?), ordena os conceitos mais prováveis. É o uso para o qual as três técnicas foram criadas | Experimentos 1 e 6: no grafo das anotações, o MRR do RotatE foi 1,47 vez o da popularidade; no grafo da LLM, ficou no nível dela |
 | 2 | Julgar uma ligação nova (*triple classification*) | Dá nota a uma ligação e a aceita ou rejeita | Experimento 8: com o TransE, 58,5% de chance de uma ligação certa ter nota maior que uma errada (o acaso é 50%). Sinal fraco, mas acima das regras simples |
-| 3 | Achar erros no grafo | As ligações já existentes com nota mais baixa vão para revisão | Não testado |
-| 4 | Juntar duplicatas | Vetores muito próximos podem ser o mesmo conceito ("IAM" e "infarto agudo do miocárdio") | Não testado com vetores |
+| 3 | Achar erros no grafo | As ligações já existentes com nota mais baixa vão para revisão | Experimento 9: no grafo da LLM, nas ligações que o treino não usou, a melhor técnica (TransE) teve AUC de 0,588. Contar em quantos prontuários a ligação aparece deu 0,666. Nas ligações com que treinou, o modelo dá nota máxima a quase todas e não separa nada |
+| 4 | Juntar duplicatas | Vetores muito próximos podem ser o mesmo conceito ("IAM" e "infarto agudo do miocárdio") | Experimento 9: a duplicata aparece entre os 10 vetores mais parecidos em 27,0% dos casos (RotatE). Ordenar pelos vizinhos em comum dá 29,6%, e ao acaso seria 0,5% |
 | 5 | Ligar a outra base (*entity alignment*) | Liga os conceitos do grafo a uma terminologia ou a outro grafo (CID-10, SNOMED CT) | Não testado |
-| 6 | Prever a categoria | Diz pelo vetor se o conceito é doença, remédio, exame... | Em parte: no experimento 3, as 85 categorias não ficaram separadas nos vetores (silhueta de −0,40 a −0,17). A previsão em si não foi testada |
-| 7 | Achar conceitos parecidos | Busca os vetores mais próximos | Experimentos 3b e 4: o vizinho mais próximo costuma ser um conceito com as mesmas ligações (40% no RotatE) ou ligado ao próprio conceito (55% no TransE), e não um conceito clinicamente parecido. Na busca do RAG, recuperou 3,9% |
-| 8 | Buscar contexto para uma LLM (RAG) | Acrescenta à busca as ligações prováveis que faltam no grafo | Experimento 4: a resposta escondida apareceu entre as 5 sugestões em 10,6% das perguntas, contra 7,0% da melhor busca sem vetores |
+| 6 | Prever a categoria | Diz pelo vetor se o conceito é doença, remédio, exame... | Experimentos 3 e 9: as 85 categorias não formam grupos nos vetores (silhueta de −0,40 a −0,17), mas um classificador acerta o grupo de 51,2% dos conceitos com os vetores do RotatE. Com a lista dos vizinhos, sem vetores, acerta 51,3%; o piso é 19,2% |
+| 7 | Achar conceitos parecidos | Busca os vetores mais próximos | Experimentos 3b e 4: o vizinho mais próximo costuma ser um conceito com as mesmas ligações (40% no RotatE) ou ligado ao próprio conceito (55% no TransE), e não um conceito clinicamente parecido. Na busca do RAG (experimento 4b), os conceitos mais parecidos recuperaram de 4,1% a 8,4%, conforme a técnica, contra 7,0% da melhor busca sem vetores |
+| 8 | Buscar contexto para uma LLM (RAG) | Acrescenta à busca as ligações prováveis que faltam no grafo | Experimentos 4 e 4b: com as ligações prováveis do RotatE, a resposta escondida apareceu entre as 5 sugestões em 10,4% das perguntas, contra 7,0% da melhor busca sem vetores (3,5 pontos a mais; intervalo de 95% de 0,9 a 6,1). O TransE deu 8,7%, e o ComplEx, 7,1% |
 | 9 | Responder perguntas sobre o grafo | Põe pergunta e resposta no mesmo espaço de vetores (o EmbedKGQA usa ComplEx) | Não testado dessa forma |
 | 10 | Consultas de vários passos | Exemplo: "remédios que tratam doenças associadas à dispneia" | Não testado |
 | 11 | Recomendar | Sugere diagnóstico, exame ou remédio a partir do que o paciente tem | Experimento 7: com o RotatE, pelo menos uma doença anotada entre as 10 sugestões em 48,1% dos prontuários. Contar as doenças que aparecem junto nos prontuários deu 58,9% |
@@ -41,6 +41,7 @@ Cada script explica no começo do arquivo o que faz e como rodar.
 | `03_agrupamento.py` | Experimento 3: agrupamento com os vetores dos modelos retreinados |
 | `03b_vizinhos_estrutura.py` | Experimento 3b: o que a entidade e seu vizinho mais próximo têm em comum no grafo? |
 | `04_avaliacao_rag.py` | Experimento 4: o grafo e os vetores ajudam o modelo de linguagem a responder? |
+| `04b_busca_com_as_quatro_tecnicas.py` | Experimento 4b: a busca do experimento 4, com as quatro técnicas |
 | `05_piloto_grafo_do_texto.py` | Experimento 5 (piloto): montar o grafo a partir do texto das notas |
 | `05b_piloto_com_categorias.py` | Experimento 5b (piloto): a versão com categorias |
 | `05c_piloto_com_ner.py` | Experimento 5c (piloto): um modelo treinado para marcar os conceitos |
@@ -54,3 +55,4 @@ Cada script explica no começo do arquivo o que faz e como rodar.
 | `07_sugestao_de_diagnosticos.py` | Experimento 7: sugerir diagnósticos para uma nota nova |
 | `08_atualizacao_do_grafo.py` | Experimento 8: atualizar o grafo com prontuários novos |
 | `08b_prontuarios_novos.py` | Experimento 8b: prontuários novos pelo fluxo inteiro (passo 10 do experimento 8) |
+| `09_outros_usos_dos_vetores.py` | Experimento 9: outros usos dos vetores (prever a categoria, achar duplicatas e apontar ligações suspeitas) |
